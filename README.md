@@ -25,7 +25,7 @@ The launcher (piagent-bundle) starts Pi with its own agent dir and this settings
 { "enabledModels": ["studio/agent-watch-auto"], "retry": { "enabled": true, "maxRetries": 3 } }
 ```
 
-The binding is read from `~/.pi/agent/agent-watch-managed.json` (written by Agent Watch; never written here), or from the file named by `PIAGENT_BINDING`. State and logs go to `PI_CODING_AGENT_DIR`.
+The binding is read from `~/.pi/agent/agent-watch-managed.json` (written by Agent Watch; never written here), or from the file named by `PIAGENT_BINDING` or, when that is unset, `AGENT_WATCH_MANAGED_BINDING` (the bundle launcher sets it; its binding has no `model` key). State and logs go to `PI_CODING_AGENT_DIR`.
 
 ## Development
 

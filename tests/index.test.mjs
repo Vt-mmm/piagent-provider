@@ -49,6 +49,19 @@ test('session shutdown closes the open run and the broker', async () => {
   } finally { await t.studio.close(); }
 });
 
+test('AGENT_WATCH_MANAGED_BINDING names the binding; PIAGENT_BINDING wins when both are set', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binding-env-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const write = (name, origin) => { const file = path.join(dir, name); fs.writeFileSync(file, JSON.stringify({ schema_version: 1, profile_id: 'c'.repeat(64), origin, broker: '/x/broker' })); return file; };
+  const saved = { a: process.env.AGENT_WATCH_MANAGED_BINDING, p: process.env.PIAGENT_BINDING };
+  t.after(() => { for (const [key, value] of [['AGENT_WATCH_MANAGED_BINDING', saved.a], ['PIAGENT_BINDING', saved.p]]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  delete process.env.PIAGENT_BINDING;
+  process.env.AGENT_WATCH_MANAGED_BINDING = write('aw.json', 'https://aw.example.test');
+  assert.equal(readBinding().origin, 'https://aw.example.test');
+  process.env.PIAGENT_BINDING = write('pa.json', 'https://pa.example.test');
+  assert.equal(readBinding().origin, 'https://pa.example.test');
+});
+
 test('the binding is read, not written, and only a sound one is accepted', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binding-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -56,6 +69,9 @@ test('the binding is read, not written, and only a sound one is accepted', t => 
   const good = { schema_version: 1, model: 'agent-watch-auto', profile_id: 'c'.repeat(64), origin: 'https://studio.example.test/', broker: '/x/broker' };
   const binding = readBinding(write('ok.json', good));
   assert.equal(binding.origin, 'https://studio.example.test');
+  // The bundle runtime's binding (Agent Watch, runtime = pi) has no `model` and extra keys.
+  const { model, ...bundleBinding } = good;
+  assert.equal(readBinding(write('pi.json', { ...bundleBinding, runtime: 'pi', bundle_root: '/x' })).broker, '/x/broker');
   const bads = [['v.json', { ...good, schema_version: 2 }], ['m.json', { ...good, model: 'other' }], ['p.json', { ...good, profile_id: 'zz' }],
     ['junk.json', 'nope'], ['big.json', ' '.repeat(20_000)]];
   for (const [name, bad] of bads)

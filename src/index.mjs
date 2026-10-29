@@ -14,12 +14,14 @@ import { createThinkingGuard } from './thinking.mjs';
 const BINDING_BYTES = 16_384;
 
 // Agent Watch writes the binding of the member's key; it is only read here.
-// PIAGENT_BINDING names another file (tests, a second profile).
-export function readBinding(file = process.env.PIAGENT_BINDING ?? path.join(os.homedir(), '.pi', 'agent', 'agent-watch-managed.json')) {
+// The file is named by PIAGENT_BINDING (tests, a second profile) or AGENT_WATCH_MANAGED_BINDING (set by the
+// bundle launcher / Agent Watch); without either, the one the stock-Pi install of Agent Watch writes.
+// A binding of the bundle runtime carries no `model`; one that does must name the company model.
+export function readBinding(file = process.env.PIAGENT_BINDING ?? process.env.AGENT_WATCH_MANAGED_BINDING ?? path.join(os.homedir(), '.pi', 'agent', 'agent-watch-managed.json')) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.size > BINDING_BYTES) throw Error('managed-binding-invalid');
   const binding = parseJson(fs.readFileSync(file, 'utf8'));
-  if (binding?.schema_version !== 1 || binding.model !== 'agent-watch-auto' || !/^[a-f0-9]{64}$/.test(binding.profile_id ?? '')) throw Error('managed-binding-invalid');
+  if (binding?.schema_version !== 1 || (binding.model !== undefined && binding.model !== 'agent-watch-auto') || !/^[a-f0-9]{64}$/.test(binding.profile_id ?? '')) throw Error('managed-binding-invalid');
   return { ...binding, origin: safeOrigin(binding.origin) };
 }
 
