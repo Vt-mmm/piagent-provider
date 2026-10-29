@@ -25,7 +25,15 @@ export function assertOwnFile(file, error) {
   if ((stat.uid !== process.getuid() && stat.uid !== 0) || (stat.mode & 0o022) !== 0) throw Error(error);
 }
 
-export function readBinding(file = process.env.PIAGENT_BINDING ?? process.env.AGENT_WATCH_MANAGED_BINDING ?? path.join(os.homedir(), '.pi', 'agent', 'agent-watch-managed.json')) {
+const bindingFile = () => process.env.PIAGENT_BINDING ?? process.env.AGENT_WATCH_MANAGED_BINDING ?? path.join(os.homedir(), '.pi', 'agent', 'agent-watch-managed.json');
+
+// Agent Watch rewrites the binding's configuration_revision when the key or
+// the Harness changes; null where the file has none or cannot be read.
+export function bindingRevision(file = bindingFile()) {
+  try { return String(parseJson(fs.readFileSync(file, 'utf8'), {}).configuration_revision ?? '') || null; } catch { return null; }
+}
+
+export function readBinding(file = bindingFile()) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.size > BINDING_BYTES) throw Error('managed-binding-invalid');
   assertOwnFile(file, 'managed-binding-untrusted');
@@ -52,7 +60,8 @@ export default async function piagentProvider(pi, deps = {}) {
   const broker = deps.broker ?? new BrokerClient({ executable: binding.broker, profileID: binding.profile_id });
   // A fresh helper reads the key's Harness as Studio has it now (the old one may hold the old one).
   const renewBroker = deps.renewBroker ?? (deps.broker ? null : () => new BrokerClient({ executable: binding.broker, profileID: binding.profile_id }));
-  const provider = await StudioProvider.create({ pi, ai: base.ai, apis: base.apis, broker, renewBroker, origin: binding.origin, lookup: base.lookup,
+  const revision = deps.bindingRevision ?? (deps.binding ? () => null : () => bindingRevision());
+  const provider = await StudioProvider.create({ bindingRevision: revision, pi, ai: base.ai, apis: base.apis, broker, renewBroker, origin: binding.origin, lookup: base.lookup,
     stateDir: deps.stateDir ?? process.env.PI_CODING_AGENT_DIR ?? null, fetchImpl: deps.fetchImpl, briefPauseMs: deps.briefPauseMs, linkOptions: deps.linkOptions });
   const thinking = createThinkingGuard(pi, { allowed: () => provider.allowed, log: entry => provider.studioLink.log(entry) });
   const stops = provider.listen();
@@ -81,6 +90,7 @@ export default async function piagentProvider(pi, deps = {}) {
   pi.on('before_agent_start', async (event, ctx) => {
     provider.ctx = ctx;
     if (event.messageType === 'user') { provider.nextPurpose = null; provider.sharedGrants.clear(); }
+    if (event.messageType === 'user') await provider.followBinding();
     const had = provider.grant;
     await provider.startRun({ text: event.prompt, level: pi.getThinkingLevel(), signal: ctx.signal });
     // The run's route may carry other limits than the last one: Pi takes the new model object.

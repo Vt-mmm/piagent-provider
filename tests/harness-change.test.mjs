@@ -103,3 +103,25 @@ test('a start that failed is not stuck: "continue" reads the Harness again and g
     noTokens(t);
   } finally { await t.cleanup(); }
 });
+
+test('Agent Watch rewrites the binding revision: the message reads the configuration again, closes the old run and goes on', async () => {
+  let revision = 'r1';
+  const t = await setup({ deps: { bindingRevision: () => revision } });
+  try {
+    const first = await collect(await t.turn('một'));
+    assert.equal(first.message.stopReason, 'stop');
+    // Same run still open (no agent_settled): the Harness changes under it.
+    const configs = t.broker.count('config'), closes = t.broker.count('close');
+    revision = 'r2';
+    changeHarness(t, 'gpt-6.1-sol');
+    const { message } = await collect(await t.turn('hai'));
+    assert.equal(message.stopReason, 'stop', message.errorMessage);
+    assert.equal(t.broker.count('config'), configs + 1);
+    assert.equal(t.broker.count('close'), closes + 1, 'the old run was closed');
+    assert.equal(t.studio.inference().at(-1).path, '/v1/responses');
+    // An unchanged revision reads nothing again.
+    await collect(await t.turn('ba'));
+    assert.equal(t.broker.count('config'), configs + 1);
+    noTokens(t);
+  } finally { await t.cleanup(); }
+});

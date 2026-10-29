@@ -29,8 +29,8 @@ export class StudioProvider {
   // `apis` maps a wire ('anthropic-messages', 'openai-responses',
   // 'openai-completions') to Pi's streamSimple for it; `ai` is pi-ai's
   // stream factory; `lookup(provider, id)` is Pi's model catalog.
-  constructor({ pi, ai, apis, broker, renewBroker = null, origin, manifest, lookup, stateDir = null, fetchImpl = (...a) => globalThis.fetch(...a), briefPauseMs, linkOptions = {} }) {
-    Object.assign(this, { pi, ai, apis, broker, renewBroker, origin, manifest, lookup, stateDir, fetchImpl, briefPauseMs });
+  constructor({ pi, ai, apis, broker, renewBroker = null, bindingRevision = () => null, origin, manifest, lookup, stateDir = null, fetchImpl = (...a) => globalThis.fetch(...a), briefPauseMs, linkOptions = {} }) {
+    Object.assign(this, { pi, ai, apis, broker, renewBroker, bindingRevision, bindingSeen: bindingRevision(), origin, manifest, lookup, stateDir, fetchImpl, briefPauseMs });
     Object.assign(this, { providerName: PROVIDER, routes: new Map(), capacityWaits: new Set(), sharedGrants: new Map(), grant: null, token: null,
       preflight: null, fast: false, allowed: null, ui: () => this.ctx?.ui ?? null, notify: event => this.notice(event) });
     this.studioLink = new StudioLink({ origin, agentDir: stateDir, fetchImpl, ui: this.ui, notify: event => this.notice(event), ...linkOptions });
@@ -107,6 +107,18 @@ export class StudioProvider {
       this.emitRunState();
     } catch (error) { this.preflight = redact(failureText(error)); }
     return this.grant;
+  }
+
+  // Before a member's message: Agent Watch rewrote the binding (key or Harness
+  // changed). A run still open belongs to the old one: it is closed, the
+  // configuration read again, and the message starts a new run.
+  async followBinding() {
+    const revision = this.bindingRevision();
+    if (!revision || revision === this.bindingSeen) return;
+    this.bindingSeen = revision;
+    this.notifyMember('Cấu hình công ty vừa đổi, đang tạo phiên mới…');
+    await this.close();
+    await this.refreshManifest().catch(error => { this.preflight = redact(failureText(error)); });
   }
 
   notifyMember(text) { try { this.ctx?.ui?.notify?.(text, 'info'); } catch { /* no Terminal */ } }
