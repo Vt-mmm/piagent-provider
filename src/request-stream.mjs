@@ -1,0 +1,244 @@
+// One model request of a company role: through Studio with the role's grant,
+// on the route the run chose. Studio answers a failure with a machine code;
+// this says who failed and why, in words. Only refusals that come before the
+// model does any work are asked again: a refusal for capacity waits in line, a
+// brief one (a sign-in being renewed, a lapsed grant) is asked again a few
+// times. Nothing that reached the model is sent twice.
+import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { describeFailure, failureCode, failureIsAdmissionRefusal, failureIsBriefRefusal, failureReason, failureText, unnamedFailureText } from './failure.mjs';
+import { CLIENT_AGENT } from './client-agent.mjs';
+import { shareGrant, releaseGrant } from './grant-share.mjs';
+import { purposeHeaders } from './call-purpose.mjs';
+import { declineFast, fastPayload, fastRefusal } from './fast-mode.mjs';
+import { compressedFetch } from './compressed-fetch.mjs';
+import { studioAPI, studioPath } from './native-catalog.mjs';
+import { verifyGrant } from './manifest.mjs';
+
+export const MODEL_ID = 'agent-watch-auto';
+// A caller may pass the provider's resolved auth headers (Pi's compaction and
+// branch summaries do): that is the registered key, and only the grant authenticates.
+const CREDENTIAL_HEADERS = /^(authorization|x-api-key)$/i;
+const withoutCredentials = headers => headers && Object.fromEntries(Object.entries(headers).filter(([name]) => !CREDENTIAL_HEADERS.test(name)));
+
+// How long one request waits in line for a free company model account.
+const CAPACITY_WAIT_MS = 20 * 60_000;
+// How long a helper's request waits before the helper moves to another model.
+export const HELPER_SWITCH_MS = 60_000;
+const HELPER_SWITCH_CODES = new Set(['session_account_not_ready_retry_later', 'account_capacity_unavailable']);
+// A brief refusal is asked again up to three times, 3, 6 and 9 s apart.
+const BRIEF_ASKS = 3, BRIEF_PAUSE_MS = 3_000;
+// Pi retries a failed answer by its words; an answer cut because Studio went
+// away carries these, so Pi asks again and the ask waits for Studio (studio-link.mjs).
+const RETRY_HINT = ' (connection error)';
+// Studio binds a conversation to one company account; the main agent names
+// its conversation (the Pi session id), not the run, so every turn reaches the
+// same account and prompt cache. These codes rebind it to another account.
+const ACCOUNT_GONE = 'session_account_unavailable_start_new_session';
+const ACCOUNT_RESTING = 'session_account_not_ready_retry_later';
+export const SESSION_REBIND_MS = 90_000;
+const MAX_REBINDS = 2;
+export function conversationSession(owner) {
+  const id = owner.sessionId?.();
+  if (typeof id !== 'string' || !/^[\w-]{8,128}$/.test(id)) return null;
+  return owner.conversationGeneration ? `${id}-${owner.conversationGeneration}` : id;
+}
+
+const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+const failedMessage = (model, errorMessage, aborted) => ({ role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+  stopReason: aborted ? 'aborted' : 'error', errorMessage: aborted ? 'Request was aborted' : errorMessage, timestamp: Date.now(), usage: ZERO_USAGE });
+
+// A failure no code names is shown as "could not be sent"; its own words are
+// kept, redacted, in the conversation file (never shown). True when kept.
+export const UNNAMED_FAILURE_ENTRY = 'agent-watch-failure-detail';
+function keepUnnamed(owner, role, raw) {
+  const text = unnamedFailureText(raw);
+  if (text === null) return false;
+  try { owner.entries?.append(UNNAMED_FAILURE_ENTRY, { role, text }); return true; } catch { return false; }
+}
+
+// The streamSimple of the Studio provider for one role. `owner` is the
+// provider's state (see provider.mjs); `inner` maps a wire to Pi's stream
+// implementation of it.
+export function studioStream(owner, role) {
+  return (model, context, options) => {
+    // Tools run between two answers: the count names the answer they came from.
+    if (role === 'main') owner.mainAnswers = (owner.mainAnswers ?? 0) + 1;
+    // What this call is for, named once: an ask again after a refusal is the same call.
+    const purpose = purposeHeaders(owner, role, context);
+    const out = owner.ai.createAssistantMessageEventStream();
+    void run(owner, role, model, context, options, purpose, out);
+    return out;
+  };
+}
+
+async function run(owner, role, model, context, options, purpose, out) {
+  const signal = options?.signal, link = owner.studioLink;
+  let wait = null, noted = false, brief = 0, refused = null, rebinds = 0, share = null;
+  const letGo = () => { if (share) { releaseGrant(owner, role, share); share = null; } };
+  // The error event and the final message carry the same failure: kept once.
+  const unnamed = raw => { noted ||= keepUnnamed(owner, role, raw); return raw; };
+  const sentence = raw => {
+    const code = failureCode(raw), text = describeFailure(role, unnamed(raw));
+    return link?.waits(code) ? text + RETRY_HINT : text;
+  };
+  // A request the member stopped ended, it did not fail; the provider may
+  // still report it as an error ("This operation was aborted").
+  const told = message => message?.stopReason !== 'error' ? message
+    : signal?.aborted ? { ...message, stopReason: 'aborted', errorMessage: 'Request was aborted' }
+    : { ...message, errorMessage: sentence(message.errorMessage) };
+  try {
+    if (role === 'main' && owner.preflight) throw Error(owner.preflight);
+    if (!owner.grant || model.provider !== owner.providerName) throw Error('managed-run-required');
+    // Pi asks once more after Stop cut a tool call: that ask ends here, without
+    // renewing the grant of a run that is about to close.
+    if (signal?.aborted) throw Error('managed-request-aborted');
+    for (;;) {
+      // Requests of one role running side by side share one renew: each renew
+      // replaces the role's token and would void a sibling's before Studio
+      // admits it. The share is let go once Studio has answered.
+      share = shareGrant(owner, role);
+      // Agent Watch could not renew the grant because Studio (or Watch's way to
+      // it) is out of reach: wait for Studio, then renew again.
+      const grant = await share.grant.catch(async error => {
+        const code = failureCode(failureText(error));
+        if (!link?.waits(code) || signal?.aborted) throw refused ? Error(refused) : error;
+        letGo();
+        const waited = await link.waitUntilBack({ phase: 'broker', code, role, conversation: conversationSession(owner), runId: owner.grant?.run_id ?? null, signal });
+        if (!waited) throw refused ? Error(refused) : error;
+        return null;
+      });
+      if (!grant) continue;
+      verifyGrant(grant, owner.manifest, role);
+      if (role === 'main') owner.grant = grant;
+      void link?.flush(grant.token);
+      owner.onGrant?.(grant, role);
+      const route = owner.routes.get(role);
+      if (!route || grant.provider_model_id !== route.native || grant.provider !== route.provider || grant.model_id !== route.model_id || model.id !== MODEL_ID) throw Error('managed-route-changed');
+      const asked = Date.now();
+      // The main agent names its conversation; a helper names its role.
+      const conversation = role === 'main' ? conversationSession(owner) : null;
+      // Fast mode, where the member turned it on and the model serves it.
+      const onPayload = fastPayload(owner, role, route, options?.onPayload), fast = onPayload !== options?.onPayload;
+      // Studio's id for this request, from its answer's headers: a stream that
+      // ends here without an answer is ended there too.
+      let studioRequest = null;
+      const onResponse = (response, at) => { studioRequest = studioRequestID(response?.headers); link?.observe(response?.headers); return options?.onResponse?.(response, at); };
+      const wire = studioAPI(route.provider);
+      const stream = owner.apis[wire]({ ...model, id: route.native, api: wire, baseUrl: owner.origin + studioPath(route.provider) }, context, {
+        ...options, apiKey: grant.token, sessionId: conversation ?? grant.role_id, maxRetries: 0, onPayload, onResponse,
+        fetch: (owner.compressedFetch ??= compressedFetch(owner, options?.fetch)),
+        headers: { ...withoutCredentials(options?.headers), ...purpose, 'User-Agent': CLIENT_AGENT, 'X-Session-Id': grant.role_id,
+          ...(conversation ? { 'X-Claude-Code-Session-Id': conversation } : {}) } });
+      // Whether Studio admitted the request is known at its first event after
+      // "start": until then nothing is passed on, so a refused request leaves no
+      // trace in the conversation.
+      let opening = [], refusal = null;
+      for await (const event of stream) {
+        if (opening && event.type === 'start') { opening.push(event); continue; }
+        const code = event.type === 'error' ? failureCode(event.error?.errorMessage) : null;
+        const again = code && !signal?.aborted && (failureIsAdmissionRefusal(code) || failureIsBriefRefusal(code) && brief < BRIEF_ASKS
+          || role === 'main' && code === ACCOUNT_GONE && rebinds < MAX_REBINDS || fast && fastRefusal(code) || link?.always(code));
+        if (opening && again) { refusal = event.error; break; }
+        if (opening) { for (const held of opening) out.push(held); opening = null; wait = capacityWaitEnded(owner, wait, 'admitted'); letGo(); link?.ok(); }
+        out.push(event.type === 'error' ? { ...event, ...(signal?.aborted ? { reason: 'aborted' } : {}), error: told(event.error) } : event);
+      }
+      if (!refusal) {
+        for (const held of opening ?? []) out.push(held);
+        const result = await stream.result();
+        if (result?.stopReason === 'error' || result?.stopReason === 'aborted') void endAtStudio(owner, studioRequest, grant.token, options?.fetch);
+        out.end(told(result)); return;
+      }
+      const refusedCode = failureCode(refusal.errorMessage);
+      // Refused with the fast tier: asked again at standard speed.
+      if (fast && fastRefusal(refusedCode)) { letGo(); declineFast(owner, refusedCode); continue; }
+      refused = String(refusal.errorMessage ?? '');
+      // A lapsed or replaced grant: the next ask renews it, not this share.
+      const stale = share; letGo();
+      if (failureIsBriefRefusal(refusedCode) && owner.sharedGrants?.get(role) === stale) owner.sharedGrants.delete(role);
+      // Studio, its gateway or its connector did not answer before the model
+      // did any work: wait for Studio to answer again, then ask again.
+      if (link?.always(refusedCode)) {
+        wait = capacityWaitEnded(owner, wait, 'ended');
+        if (await link.waitUntilBack({ phase: 'model', code: refusedCode, role, conversation: conversationSession(owner), runId: grant.run_id ?? null, signal })) continue;
+        out.push({ type: 'error', reason: 'error', error: told(refusal) }); out.end(); return;
+      }
+      // The conversation's account is gone (signed out, removed) or has rested
+      // past SESSION_REBIND_MS: a new generation lets Studio bind the
+      // conversation to another account (its prompt cache starts over once).
+      const resting = refusedCode === ACCOUNT_RESTING && wait && Date.now() - wait.since >= (owner.sessionRebindMs ?? SESSION_REBIND_MS);
+      if (role === 'main' && rebinds < MAX_REBINDS && (refusedCode === ACCOUNT_GONE || resting)) {
+        owner.conversationGeneration = (owner.conversationGeneration ?? 0) + 1; rebinds += 1;
+        wait = capacityWaitEnded(owner, wait, 'rebound');
+        continue;
+      }
+      // A brief refusal is asked again after a short pause, without a wait step.
+      if (failureIsBriefRefusal(refusedCode)) { brief += 1; await sleep((owner.briefPauseMs ?? BRIEF_PAUSE_MS) * brief, undefined, { signal }); continue; }
+      wait = await waitForCapacity(owner, wait, role, refusedCode, signal, Date.now() - asked);
+      if (!wait) { out.push({ type: 'error', reason: 'error', error: told(refusal) }); out.end(); return; }
+    }
+  } catch (error) {
+    const aborted = !!signal?.aborted;
+    out.push({ type: 'error', reason: aborted ? 'aborted' : 'error', error: failedMessage(model, aborted ? '' : sentence(error?.message), aborted) });
+    out.end();
+  } finally { letGo(); capacityWaitEnded(owner, wait, signal?.aborted ? 'stopped' : 'ended'); }
+}
+
+// Studio learns that a member's stream ended (it failed here, or Stop) only
+// when the connection closes, and behind a gateway it may never learn it: a
+// degenerate answer streamed on for ten minutes after the member's request had
+// failed and the conversation's account stayed busy. The request is ended at
+// Studio by its id. Fire and forget: a Studio without this (404) changes nothing.
+const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function studioRequestID(headers) {
+  const value = typeof headers?.get === 'function' ? headers.get('x-request-id') : headers?.['x-request-id'];
+  const id = String(value ?? '').trim();
+  return REQUEST_ID.test(id) ? id : null;
+}
+export function endAtStudio(owner, requestID, token, fetchImpl = (...args) => globalThis.fetch(...args)) {
+  if (!requestID || !token || !owner?.origin) return Promise.resolve(false);
+  return fetchImpl(`${owner.origin}/v1/requests/${requestID}/cancel`, { method: 'POST', signal: AbortSignal.timeout(10_000),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': CLIENT_AGENT }, body: '{}' })
+    .then(response => { void response.body?.cancel?.().catch(() => {}); return response.status === 202; }, () => false);
+}
+
+// Studio itself holds a refused request up to 30 s while it waits for a slot:
+// one it held is asked again almost at once, so a long wait keeps its place
+// against requests that just arrived. One refused at once (a rate limit) backs
+// off, 2 s doubling to 15 s.
+export function capacityDelayMs(asks, heldMs, random = Math.random()) {
+  return heldMs >= 10_000 ? 500 + 1000 * random : Math.min(15_000, 1_000 * 2 ** Math.min(asks, 4)) * (0.75 + random / 2);
+}
+
+// Studio refused a request for capacity (every company model account that can
+// serve this conversation is busy): the request waits in line and asks again,
+// shown as a step of the running turn; Stop ends the wait. After CAPACITY_WAIT_MS
+// it fails with Studio's reason. Null: stop waiting.
+async function waitForCapacity(owner, wait, role, code, signal, heldMs = 0) {
+  if (wait && Date.now() - wait.since >= (owner.capacityWaitMs ?? CAPACITY_WAIT_MS)) { capacityWaitEnded(owner, wait, 'gave-up'); return null; }
+  // A helper whose model has no account free for a while stops waiting: it
+  // starts once more, and Studio gives it the next model of its role.
+  if (wait && role !== 'main' && HELPER_SWITCH_CODES.has(code) && Date.now() - wait.since >= (owner.helperSwitchMs ?? HELPER_SWITCH_MS)) { capacityWaitEnded(owner, wait, 'switched'); return null; }
+  wait ??= { id: randomUUID(), role, since: Date.now(), asks: 0, open: true };
+  wait.asks += 1; wait.code = code;
+  owner.capacityWaits.add(wait);
+  owner.notify?.({ type: 'managed_capacity_wait', id: wait.id, role, code, state: wait.asks === 1 ? 'start' : 'waiting', waitedMs: Date.now() - wait.since });
+  capacityStatus(owner);
+  try { await sleep(capacityDelayMs(wait.asks, heldMs), undefined, { signal }); }
+  catch (error) { capacityWaitEnded(owner, wait, 'stopped'); throw error; }
+  return wait;
+}
+function capacityWaitEnded(owner, wait, outcome) {
+  if (!wait?.open) return null;
+  wait.open = false; owner.capacityWaits.delete(wait);
+  owner.notify?.({ type: 'managed_capacity_wait', id: wait.id, role: wait.role, code: wait.code, state: 'end', outcome, waitedMs: Date.now() - wait.since });
+  capacityStatus(owner);
+  return null;
+}
+// The Terminal's working line says who waits and why, while anyone does.
+function capacityStatus(owner) {
+  const wait = [...owner.capacityWaits].at(-1);
+  const who = wait?.role === 'main' ? 'main agent' : `${wait?.role} subagent`;
+  try { owner.ui?.()?.setWorkingMessage?.(wait ? `Agent Watch ${who}: waiting for a free company model account (${failureReason(wait.code)}). Esc stops.` : undefined); }
+  catch { /* no Terminal */ }
+}
