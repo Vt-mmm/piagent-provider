@@ -21,7 +21,7 @@ export class FakeWorld {
   constructor(manifest) { this.manifest = manifest; this.valid = new Map(); this.calls = []; this.route = 'claude-sonnet-5-5'; this.fail = new Map(); this.runs = 0; }
   token(roleID) { const t = `as_run_${roleID}_${randomBytes(32).toString('base64url')}`; this.valid.set(roleID, t); return t; }
   grant(role, slot) {
-    const entry = this.manifest.models.find(m => m.id === this.route), key = slot ? `${role}#${slot}` : role;
+    const entry = MODELS.find(m => m.id === this.route), key = slot ? `${role}#${slot}` : role;
     this.roles ??= new Map();
     const prior = this.roles.get(key), roleID = prior?.role_id ?? randomUUID(), fence = (prior?.fence ?? 0) + 1;
     const grant = { ...AUTHORITY, run_id: this.runID, role_id: roleID, role, model_id: entry.id, provider: entry.owned_by, provider_model_id: entry.provider_model_id,

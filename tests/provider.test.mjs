@@ -140,7 +140,8 @@ test('thinking follows the Harness: the run asks for the nearest allowed level a
 test('a run that cannot start answers the turn with the reason instead of failing it', async () => {
   const t = await setup();
   try {
-    t.world.fail.set('start', [{ message: 'managed-broker:permissionDenied' }]);
+    // Refused twice: the configuration is read again once, and the reason still stands.
+    t.world.fail.set('start', [{ message: 'managed-broker:permissionDenied' }, { message: 'managed-broker:permissionDenied' }]);
     const { message } = await collect(await t.turn());
     assert.equal(message.stopReason, 'error');
     assert.match(message.errorMessage, /no longer holds a usable company key/);

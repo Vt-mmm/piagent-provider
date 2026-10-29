@@ -50,11 +50,20 @@ export default async function piagentProvider(pi, deps = {}) {
   const base = { ...(await defaultDeps()), ...deps };
   if (!deps.broker) { if (!path.isAbsolute(String(binding.broker))) throw Error('managed-binding-untrusted'); assertOwnFile(binding.broker, 'managed-binding-untrusted'); }
   const broker = deps.broker ?? new BrokerClient({ executable: binding.broker, profileID: binding.profile_id });
-  const provider = await StudioProvider.create({ pi, ai: base.ai, apis: base.apis, broker, origin: binding.origin, lookup: base.lookup,
+  // A fresh helper reads the key's Harness as Studio has it now (the old one may hold the old one).
+  const renewBroker = deps.renewBroker ?? (deps.broker ? null : () => new BrokerClient({ executable: binding.broker, profileID: binding.profile_id }));
+  const provider = await StudioProvider.create({ pi, ai: base.ai, apis: base.apis, broker, renewBroker, origin: binding.origin, lookup: base.lookup,
     stateDir: deps.stateDir ?? process.env.PI_CODING_AGENT_DIR ?? null, fetchImpl: deps.fetchImpl, briefPauseMs: deps.briefPauseMs, linkOptions: deps.linkOptions });
   const thinking = createThinkingGuard(pi, { allowed: () => provider.allowed, log: entry => provider.studioLink.log(entry) });
   const stops = provider.listen();
   const model = ctx => ctx.modelRegistry.find(PROVIDER, provider.model.id);
+
+  // A run rebuilt in the middle of a turn (the Harness changed): the model object and the thinking level follow the new grant.
+  provider.onRebuilt = async grant => {
+    const found = provider.ctx && model(provider.ctx);
+    if (found) await pi.setModel(found);
+    if (grant.effort) thinking.force(grant.effort);
+  };
 
   pi.on('session_start', async (_event, ctx) => {
     provider.ctx = ctx;

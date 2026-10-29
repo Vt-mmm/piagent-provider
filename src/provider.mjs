@@ -9,7 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { BUS_VERSION, CHANNEL, busCallAllowed, reply } from './bus.mjs';
 import { claimNonce, nonceOk, withNonce } from './bus-nonce.mjs';
 import { CLIENT_AGENT } from './client-agent.mjs';
-import { failureCode, failureText } from './failure.mjs';
+import { STALE, failureCode, failureText } from './failure.mjs';
 import { seedGrant, shareGrant, releaseGrant, slotArgs } from './grant-share.mjs';
 import { allowedThinkingLevels, nearestLevel, taskClass, usableManifest, verifyGrant } from './manifest.mjs';
 import { nativeManagedModel, piProvider, studioModel } from './native-catalog.mjs';
@@ -29,8 +29,8 @@ export class StudioProvider {
   // `apis` maps a wire ('anthropic-messages', 'openai-responses',
   // 'openai-completions') to Pi's streamSimple for it; `ai` is pi-ai's
   // stream factory; `lookup(provider, id)` is Pi's model catalog.
-  constructor({ pi, ai, apis, broker, origin, manifest, lookup, stateDir = null, fetchImpl = (...a) => globalThis.fetch(...a), briefPauseMs, linkOptions = {} }) {
-    Object.assign(this, { pi, ai, apis, broker, origin, manifest, lookup, stateDir, fetchImpl, briefPauseMs });
+  constructor({ pi, ai, apis, broker, renewBroker = null, origin, manifest, lookup, stateDir = null, fetchImpl = (...a) => globalThis.fetch(...a), briefPauseMs, linkOptions = {} }) {
+    Object.assign(this, { pi, ai, apis, broker, renewBroker, origin, manifest, lookup, stateDir, fetchImpl, briefPauseMs });
     Object.assign(this, { providerName: PROVIDER, routes: new Map(), capacityWaits: new Set(), sharedGrants: new Map(), grant: null, token: null,
       preflight: null, fast: false, allowed: null, ui: () => this.ctx?.ui ?? null, notify: event => this.notice(event) });
     this.studioLink = new StudioLink({ origin, agentDir: stateDir, fetchImpl, ui: this.ui, notify: event => this.notice(event), ...linkOptions });
@@ -84,12 +84,20 @@ export class StudioProvider {
   // start becomes a turn answered with the reason (preflight), not a crash.
   async startRun({ text, level, signal }) {
     if (this.grant) return this.grant;
+    // A start that failed before is not asked again with what failed it: the
+    // Harness may have changed since, so the configuration is read again.
+    const failedBefore = this.preflight !== null;
     this.preflight = null; this.sharedGrants.clear(); this.capabilitiesAsked = false;
+    this.lastStart = { text, level };
+    let reread = false;
     try {
+      if (failedBefore) { await this.refreshManifest().catch(() => {}); reread = true; }
       for (;;) {
         try { this.grant = await this.#start(text, level); break; }
         catch (error) {
           const code = failureCode(failureText(error));
+          // The Harness or the key changed after this conversation read it: read it again, once.
+          if (!reread && STALE.test(code)) { reread = true; this.notifyMember('Cấu hình công ty vừa đổi, đang tạo phiên mới…'); await this.refreshManifest(); continue; }
           if (!(await this.studioLink.waitUntilBack({ phase: 'broker', code, conversation: this.conversation(), signal: signal ?? this.shutdown.signal }).catch(() => null))) throw error;
         }
       }
@@ -98,6 +106,40 @@ export class StudioProvider {
       this.installRoute(route);
       this.emitRunState();
     } catch (error) { this.preflight = redact(failureText(error)); }
+    return this.grant;
+  }
+
+  notifyMember(text) { try { this.ctx?.ui?.notify?.(text, 'info'); } catch { /* no Terminal */ } }
+
+  // The key's configuration as Studio has it now: the main model, the thinking
+  // levels, the helper roles. A fresh Agent Watch helper reads it where the
+  // host gave a way to start one (the old one may hold the old Harness).
+  async refreshManifest() {
+    let broker = this.broker, fresh = null;
+    if (this.renewBroker) { fresh = this.renewBroker(); broker = fresh; }
+    let manifest;
+    try { manifest = usableManifest(await patiently(() => broker.request('config'), 3)); }
+    catch (error) { await fresh?.dispose().catch(() => {}); throw error; }
+    if (fresh) { const old = this.broker; this.broker = fresh; await old.dispose().catch(() => {}); }
+    this.manifest = manifest;
+    const candidate = manifest.models.find(m => manifest.harness.configuration.main.model_ids.includes(m.id));
+    if (!candidate) throw Error('managed-main-model-unavailable');
+    this.installRoute({ model_id: candidate.id, provider: candidate.owned_by, provider_model_id: candidate.provider_model_id });
+    this.emitRunState();
+  }
+
+  // The run a request holds is not the key's Harness any more (Studio refused
+  // its grant, or the grant names another route): the old run is closed and a
+  // new one started for the same message, same conversation. The request is
+  // then sent again by the caller, once.
+  async rebuildRun({ signal } = {}) {
+    this.notifyMember('Cấu hình công ty vừa đổi, đang tạo phiên mới…');
+    await this.close();
+    await this.refreshManifest();
+    const { text, level } = this.lastStart ?? {};
+    await this.startRun({ text, level, signal });
+    if (!this.grant) throw Error(this.preflight ?? 'managed-run-required');
+    await this.onRebuilt?.(this.grant);
     return this.grant;
   }
 
