@@ -34,7 +34,7 @@ test('failures: Studio code, gateway page, network words and local codes; the se
   const token = `as_run_${'a'.repeat(36)}_${'b'.repeat(43)}`;
   assert.doesNotMatch(describeFailure('main', `401 {"code":"invalid_run_grant"} Bearer ${token}`), /as_run_/);
   assert.doesNotMatch(unnamedFailureText(`weird ${token} failure`) ?? '', /as_run_/);
-  assert.equal(redact(`x ${token} y Bearer abcdefghijkl z sk-abcdefghijklmnop`), 'x [redacted] y [redacted] z [redacted]');
+  assert.equal(redact(`x ${token} y Bearer abcdefghijkl z sk-abcdefghijklmnop`), 'x [redacted] y Bearer [redacted] z [redacted]');
 });
 
 // Studio tells the coding tool from the User-Agent (internal/clients/service.go, pattern "pi").

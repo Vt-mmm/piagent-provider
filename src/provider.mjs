@@ -6,7 +6,8 @@
 // `context` hook stalls Pi's startup).
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { BUS_VERSION, CHANNEL, callPathAllowed, reply } from './bus.mjs';
+import { BUS_VERSION, CHANNEL, busCallAllowed, reply } from './bus.mjs';
+import { claimNonce, nonceOk, withNonce } from './bus-nonce.mjs';
 import { CLIENT_AGENT } from './client-agent.mjs';
 import { failureCode, failureText } from './failure.mjs';
 import { seedGrant, shareGrant, releaseGrant, slotArgs } from './grant-share.mjs';
@@ -114,13 +115,13 @@ export class StudioProvider {
   // starts and again when Studio's capability list refreshes.
   emitRunState() {
     const m = this.manifest, configuration = m.harness.configuration, authority = m.authority ?? {}, features = m.broker_features ?? [];
-    this.pi.events.emit(CHANNEL.runState, { v: BUS_VERSION, runId: this.grant?.run_id ?? null,
+    this.pi.events.emit(CHANNEL.runState, withNonce(this.pi.events, { v: BUS_VERSION, runId: this.grant?.run_id ?? null,
       capabilities: this.capabilities ? [...this.capabilities] : [], team: m.user?.team_name ?? null,
       scope: { studio_instance_id: authority.studio_instance_id, dataset_epoch: authority.dataset_epoch, auth_generation: authority.auth_generation, key_id: m.key_id },
       harness: { thinking: { allowed: this.allowed, effort: this.grant?.effort ?? null }, bypassMode: configuration.bypass_mode === true,
         helperCalls: ['scout', 'research', 'verify', 'review'].filter(role => configuration[role]?.model_ids?.length),
         protocol: processVersion(features), features, workflow: configuration.workflow ?? null,
-        ...(Number.isInteger(m.helper_slots) ? { helperLimit: m.helper_slots } : {}) } });
+        ...(Number.isInteger(m.helper_slots) ? { helperLimit: m.helper_slots } : {}) } }));
   }
 
   // Every request of a turn is authenticated by the grant renewed here: the
@@ -180,7 +181,7 @@ export class StudioProvider {
   // default), which never leaves this package. Only Studio's own run and managed paths.
   async studioCall({ method = 'POST', path, body, role = 'main' }) {
     if (!this.grant) throw Error('managed-run-required');
-    if (!callPathAllowed(path) || !['GET', 'POST'].includes(method) || !this.routes.has(role)) throw Error('managed-call-refused');
+    if (!busCallAllowed(path) || !['GET', 'POST'].includes(method) || !this.routes.has(role)) throw Error('managed-call-refused');
     // A helper's call (settle) uses that helper's grant, not main's.
     const share = shareGrant(this, role);
     try {
@@ -196,12 +197,14 @@ export class StudioProvider {
   // Wires the harness-facing channels of the bus.
   listen() {
     const { events } = this.pi;
+    claimNonce(events, 'provider'); // the bus secret of the harness, when there is one (bus-nonce.mjs)
+    const checked = handler => p => { if (nonceOk(events, p)) handler(p); else reply(p, { ok: false, error: 'managed-bus-nonce' }); };
     const answer = (payload, work) => work().then(result => reply(payload, { ok: true, ...result }), error => reply(payload, { ok: false, error: failureCode(failureText(error)) }));
     return [
-      events.on(CHANNEL.grantRequest, p => void answer(p, async () => ({ role: p.role, ...(await this.grantFor({ role: p.role, slot: p.slot })) }))),
-      events.on(CHANNEL.grantClose, p => void this.closeChild(p).catch(() => {})),
-      events.on(CHANNEL.runProcess, p => this.setProcess(p?.process)),
-      events.on(CHANNEL.studioCall, p => void answer(p, () => this.studioCall(p))),
+      events.on(CHANNEL.grantRequest, checked(p => void answer(p, async () => ({ role: p.role, ...(await this.grantFor({ role: p.role, slot: p.slot })) })))),
+      events.on(CHANNEL.grantClose, checked(p => void this.closeChild(p).catch(() => {}))),
+      events.on(CHANNEL.runProcess, checked(p => this.setProcess(p?.process))),
+      events.on(CHANNEL.studioCall, checked(p => void answer(p, () => this.studioCall(p)))),
     ];
   }
 

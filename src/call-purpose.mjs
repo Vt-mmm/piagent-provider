@@ -46,8 +46,8 @@ export function purposeHeaders(owner, role, context) {
   else if (role !== 'main') purpose = 'brief';
   else if (['harness', 'continue'].includes(owner.nextPurpose)) { purpose = owner.nextPurpose; owner.nextPurpose = null; }
   else purpose = 'answer';
-  const title = purpose === 'brief' ? owner.jobTitles?.get(role) : '';
-  return { 'X-Agent-Purpose': purpose, ...(after ? { 'X-Agent-After': after } : {}), ...(title ? { 'X-Agent-Task': encodeURIComponent(title) } : {}),
+  // The helper's brief is prompt text: it is not sent to Studio, only the purpose label.
+  return { 'X-Agent-Purpose': purpose, ...(after ? { 'X-Agent-After': after } : {}),
     ...(role === 'main' ? compactionHeaders(owner, purpose) : {}) };
 }
 

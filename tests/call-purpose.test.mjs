@@ -25,7 +25,7 @@ test('a call names what it is for: answer, step after tools, harness turn, summa
   assert.equal(purposeHeaders(owner, 'main', {messages: [{role: 'system', content: 'You are the company agent'}, user]})['X-Agent-Purpose'], 'answer');
   owner.jobTitles = new Map([['scout', 'Tìm chỗ lưu token đăng nhập']]);
   assert.deepEqual(purposeHeaders(owner, 'scout', {messages: [user]}),
-    {'X-Agent-Purpose': 'brief', 'X-Agent-Task': encodeURIComponent('Tìm chỗ lưu token đăng nhập')});
+    {'X-Agent-Purpose': 'brief'}, 'the brief is prompt text: only the purpose label goes to Studio');
   assert.deepEqual(purposeHeaders(owner, 'scout', {messages: [user, answer('grep'), result]}), {'X-Agent-Purpose': 'tool_step', 'X-Agent-After': 'grep'});
 });
 

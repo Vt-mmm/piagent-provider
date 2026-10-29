@@ -17,6 +17,11 @@ export const CHANNEL = {
 const ALLOWED_PATH = /^\/(?:v1|studio\/v1\/managed)\/[A-Za-z0-9_./-]*(?:\?[A-Za-z0-9_=&.%-]*)?$/;
 export const callPathAllowed = path => typeof path === 'string' && ALLOWED_PATH.test(path) && !path.includes('..') && !path.includes('//');
 
+// What the harness really asks of Studio over the bus (piagent:studio.call): exact paths, no query. Any other extension in the process
+// that emits this channel is held to the same list, so the run's grant cannot be used for a model call or another Studio API.
+const BUS_PATHS = /^(?:\/studio\/v1\/managed\/tool-failures|\/v1\/managed\/settle|\/v1\/memory\/(?:brief|search|ask|page|retain|git|telemetry))$/;
+export const busCallAllowed = path => typeof path === 'string' && BUS_PATHS.test(path);
+
 export function reply(payload, answer) {
   try { payload?.reply?.({ v: BUS_VERSION, ...answer }); } catch { /* a listener that throws does not stop the provider */ }
 }

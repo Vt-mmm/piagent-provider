@@ -10,7 +10,7 @@ export const apis = { 'anthropic-messages': ai.anthropicMessagesApi().streamSimp
   'openai-completions': ai.openAICompletionsApi().streamSimple };
 
 // A provider on a fake Pi, a fake broker and a fake Studio, with a temporary state dir.
-export async function setup({ manifestOptions, studioOptions, deps = {} } = {}) {
+export async function setup({ manifestOptions, studioOptions, deps = {}, beforeLoad } = {}) {
   const studio = await new FakeStudio(new FakeWorld(null), studioOptions).listen();
   const world = studio.world;
   world.manifest = manifestFor(studio.origin, manifestOptions);
@@ -18,6 +18,7 @@ export async function setup({ manifestOptions, studioOptions, deps = {} } = {}) 
   const broker = new FakeBroker(world), pi = new FakePi();
   pi.makeContext();
   const binding = { origin: studio.origin, broker: '/unused', profile_id: 'a'.repeat(64) };
+  beforeLoad?.(pi); // what loads before the provider (the harness's bus secret)
   const provider = await piagentProvider(pi, { binding, broker, stateDir, briefPauseMs: 1, CustomEditor: class { setText() {} }, ...deps });
   return { studio, world, broker, pi, provider, stateDir, ctx: pi.ctx,
     async turn(text = 'xin chào', extra = {}) {
