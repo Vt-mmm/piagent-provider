@@ -19,6 +19,14 @@ test('run.state tells the harness the allowed thinking levels and the protocol w
     assert.equal(states[0].harness.bypassMode, true);
     assert.equal(states[0].harness.protocol, 1);
     assert.deepEqual(states[0].harness.helperCalls, ['scout']);
+    assert.deepEqual(Object.keys(states[0].scope), ['studio_instance_id', 'dataset_epoch', 'auth_generation', 'key_id']);
+    assert.deepEqual(states[0].harness.features, ['process', 'close-retry']);
+    assert.equal(states[0].harness.helperLimit, undefined, 'absent unless Studio sends helper_slots');
+    assert.deepEqual(states[0].capabilities, []);
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(states.length, 2, 'run.state again once the capability list refreshed');
+    assert.deepEqual(states[1].capabilities, ['requests.cancel.v1']);
+    assert.doesNotMatch(JSON.stringify(states), TOKEN);
   } finally { await t.cleanup(); }
 });
 
@@ -80,5 +88,19 @@ test('a close that cannot reach Studio is asked again while the link waits, then
     await t.finish();
     assert.equal(t.broker.count('close'), 3);
     assert.ok(t.pi.entries.some(e => e.customType === 'agent-watch-run' && e.data.state === 'closed'));
+  } finally { await t.cleanup(); }
+});
+
+test('studio.call with a role uses that helper\'s grant, and refuses a role without one', async () => {
+  const t = await setup();
+  try {
+    await t.pi.fire('before_agent_start', { messageType: 'user', prompt: 'x' });
+    assert.equal((await ask(t.pi, 'piagent:studio.call', { path: '/v1/managed/settle', role: 'review' })).ok, false);
+    await ask(t.pi, 'piagent:grant.request', { role: 'review', purpose: 'brief' });
+    const answer = await ask(t.pi, 'piagent:studio.call', { path: '/v1/managed/settle', role: 'review', body: {} });
+    assert.ok(answer.status > 0, answer.error);
+    const [renew] = t.broker.log.filter(e => e.action === 'renew').slice(-1);
+    assert.equal(renew.role, 'review');
+    for (const path of ['/v1/memory/search', '/studio/v1/managed/tool-failures']) assert.notEqual((await ask(t.pi, 'piagent:studio.call', { path, body: {} })).error, 'managed-request-failed', path);
   } finally { await t.cleanup(); }
 });

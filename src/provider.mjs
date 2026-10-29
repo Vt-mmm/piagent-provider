@@ -96,7 +96,7 @@ export class StudioProvider {
       const route = { provider: this.grant.provider, model_id: this.grant.model_id, provider_model_id: this.grant.provider_model_id };
       this.installRoute(route);
       this.emitRunState();
-      void refreshCapabilities(this, this.grant);
+      void refreshCapabilities(this, this.grant).then(() => this.emitRunState());
     } catch (error) { this.preflight = redact(failureText(error)); }
     return this.grant;
   }
@@ -111,12 +111,17 @@ export class StudioProvider {
 
   conversation() { return this.sessionId(); }
 
+  // Everything the harness needs of the run, with no token. Sent when a run
+  // starts and again when Studio's capability list refreshes.
   emitRunState() {
-    const configuration = this.manifest.harness.configuration;
-    this.pi.events.emit(CHANNEL.runState, { v: BUS_VERSION, runId: this.grant?.run_id ?? null, harness: {
-      thinking: { allowed: this.allowed, effort: this.grant?.effort ?? null }, bypassMode: configuration.bypass_mode === true,
-      helperCalls: ['scout', 'research', 'verify', 'review'].filter(role => configuration[role]?.model_ids?.length),
-      protocol: processVersion(this.manifest.broker_features ?? []) } });
+    const m = this.manifest, configuration = m.harness.configuration, authority = m.authority ?? {}, features = m.broker_features ?? [];
+    this.pi.events.emit(CHANNEL.runState, { v: BUS_VERSION, runId: this.grant?.run_id ?? null,
+      capabilities: this.capabilities ? [...this.capabilities] : [], team: m.user?.team_name ?? null,
+      scope: { studio_instance_id: authority.studio_instance_id, dataset_epoch: authority.dataset_epoch, auth_generation: authority.auth_generation, key_id: m.key_id },
+      harness: { thinking: { allowed: this.allowed, effort: this.grant?.effort ?? null }, bypassMode: configuration.bypass_mode === true,
+        helperCalls: ['scout', 'research', 'verify', 'review'].filter(role => configuration[role]?.model_ids?.length),
+        protocol: processVersion(features), features, workflow: configuration.workflow ?? null,
+        ...(Number.isInteger(m.helper_slots) ? { helperLimit: m.helper_slots } : {}) } });
   }
 
   // Every request of a turn is authenticated by the grant renewed here: the
@@ -165,12 +170,13 @@ export class StudioProvider {
     await this.broker.request('close', slotArgs(key));
   }
 
-  // A call to Studio for the harness package, with the main grant, which never
-  // leaves this package. Only Studio's own run and managed paths.
-  async studioCall({ method = 'POST', path, body }) {
+  // A call to Studio for the harness package, with the grant of `role` (main by
+  // default), which never leaves this package. Only Studio's own run and managed paths.
+  async studioCall({ method = 'POST', path, body, role = 'main' }) {
     if (!this.grant) throw Error('managed-run-required');
-    if (!callPathAllowed(path) || !['GET', 'POST'].includes(method)) throw Error('managed-call-refused');
-    const share = shareGrant(this, 'main');
+    if (!callPathAllowed(path) || !['GET', 'POST'].includes(method) || !this.routes.has(role)) throw Error('managed-call-refused');
+    // A helper's call (settle) uses that helper's grant, not main's.
+    const share = shareGrant(this, role);
     try {
       const grant = await share.grant;
       const response = await this.fetchImpl(`${this.origin}${path}`, { method, signal: AbortSignal.timeout(15_000),
@@ -178,7 +184,7 @@ export class StudioProvider {
         ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) });
       const text = (await response.text()).slice(0, CALL_BYTES);
       return { ok: response.ok, status: response.status, body: redact(text) };
-    } finally { releaseGrant(this, 'main', share); }
+    } finally { releaseGrant(this, role, share); }
   }
 
   // Wires the harness-facing channels of the bus.
