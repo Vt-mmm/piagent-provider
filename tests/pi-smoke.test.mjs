@@ -1,4 +1,4 @@
-// The provider inside real Pi 1.3.0 (the pinned peer dependency), against a
+// The provider inside real Pi 1.4.0 (the pinned peer dependency), against a
 // simulated Studio and broker, in a temporary agent dir. Nothing real is called
 // and nothing is written outside the temporary directory.
 import test from 'node:test';

@@ -45,23 +45,23 @@ test('the client names itself so Studio recognises it as the Pi family with its 
 });
 
 test('pi host: pinned version, plan, private install paths, no writes to the real home', () => {
-  assert.equal(PI_HOST_VERSION, '1.3.0');
-  assert.deepEqual([hostPlan('1.3.0'), hostPlan('1.4.1'), hostPlan('1.2.0'), hostPlan(null)], ['current', 'private', 'global', 'global']);
-  assert.ok(compareVersions('1.10.0', '1.9.9') > 0 && compareVersions('1.3.0+x', '1.3.0') === 0);
+  assert.equal(PI_HOST_VERSION, '1.4.0');
+  assert.deepEqual([hostPlan('1.4.0'), hostPlan('1.5.1'), hostPlan('1.3.0'), hostPlan(null)], ['current', 'private', 'global', 'global']);
+  assert.ok(compareVersions('1.10.0', '1.9.9') > 0 && compareVersions('1.4.0+x', '1.4.0') === 0);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'host-home-'));
   try {
-    assert.equal(privateHostRoot('1.3.0', home), null);
+    assert.equal(privateHostRoot('1.4.0', home), null);
     const lines = [];
-    const root = installPrivateHost({ version: '1.3.0', home, dryRun: true, log: line => lines.push(line) });
-    assert.ok(root.startsWith(privateHostPrefix('1.3.0', home)));
-    assert.match(lines[0], /^DRY RUN: npm install .*--ignore-scripts.*pi-coding-agent@1\.3\.0$/);
+    const root = installPrivateHost({ version: '1.4.0', home, dryRun: true, log: line => lines.push(line) });
+    assert.ok(root.startsWith(privateHostPrefix('1.4.0', home)));
+    assert.match(lines[0], /^DRY RUN: npm install .*--ignore-scripts.*pi-coding-agent@1\.4\.0$/);
     assert.equal(fs.existsSync(path.join(home, '.piagent')), false, 'a dry run writes nothing');
-    const fake = path.join(home, '.piagent', 'pi-host', '1.3.0', 'node_modules', '@earendil-works', 'pi-coding-agent');
+    const fake = path.join(home, '.piagent', 'pi-host', '1.4.0', 'node_modules', '@earendil-works', 'pi-coding-agent');
     fs.mkdirSync(fake, { recursive: true });
-    fs.writeFileSync(path.join(fake, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', version: '1.3.0', bin: { pi: 'dist/cli.js' } }));
-    assert.equal(privateHostRoot('1.3.0', home), fs.realpathSync(fake));
+    fs.writeFileSync(path.join(fake, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', version: '1.4.0', bin: { pi: 'dist/cli.js' } }));
+    assert.equal(privateHostRoot('1.4.0', home), fs.realpathSync(fake));
     assert.equal(hostCli(fake), path.join(fake, 'dist/cli.js'));
-    assert.equal(privateHostRoot('1.2.0', home), null);
+    assert.equal(privateHostRoot('1.3.0', home), null);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
   assert.ok(hostPackage(new URL('../node_modules/@earendil-works/pi-coding-agent', import.meta.url).pathname, '@earendil-works/pi-ai').includes('pi-ai'));
   assert.throws(() => hostPackage(os.tmpdir(), 'no-such-package-xyz'), /managed-sdk-dependency-missing/);

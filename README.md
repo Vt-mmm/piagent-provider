@@ -2,7 +2,7 @@
 
 Studio model provider for Piagent company mode: one 'Auto (company)' model, run grants through Agent Watch, Harness-driven thinking.
 
-Part of the Piagent company-mode bundle for stock [Pi](https://github.com/earendil-works) (pinned: `@earendil-works/pi-coding-agent` 1.3.0). See `piagent-bundle/docs` for the plan, contracts and runbook.
+Part of the Piagent company-mode bundle for stock [Pi](https://github.com/earendil-works) (pinned: `@earendil-works/pi-coding-agent` 1.4.0). See `piagent-bundle/docs` for the plan, contracts and runbook.
 
 Status: phase 2.1, implemented against simulated Studio and broker only. Not yet run against a real Agent Watch or Studio.
 
@@ -34,7 +34,7 @@ npm ci
 npm test
 ```
 
-Tests run offline: a simulated Studio and broker, and real Pi 1.3.0 in a temporary agent dir (`tests/pi-smoke.test.mjs`). No real Studio, model, Keychain or `~/.pi/agent` is touched.
+Tests run offline: a simulated Studio and broker, and real Pi 1.4.0 in a temporary agent dir (`tests/pi-smoke.test.mjs`). No real Studio, model, Keychain or `~/.pi/agent` is touched.
 
 ## Security
 

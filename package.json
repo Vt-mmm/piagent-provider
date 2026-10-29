@@ -9,8 +9,8 @@
     "node": ">=22.19"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "1.3.0",
-    "@earendil-works/pi-coding-agent": "1.3.0"
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0"
   },
   "main": "src/index.mjs",
   "scripts": {

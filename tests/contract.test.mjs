@@ -32,8 +32,12 @@ function matches(received, expected, label) {
   const names = Object.keys(received.headers);
   for (const name of expected.headerNames) assert.ok(names.includes(name), `${label}: header ${name} is sent`);
   for (const [name, value] of Object.entries(expected.headerValues)) assert.equal(received.headers[name], value, `${label}: ${name}`);
-  assert.deepEqual(Object.keys(received.parsed), expected.bodyKeys, `${label}: body fields`);
-  assert.equal(received.parsed.tools.length, expected.tools, `${label}: tools`);
+  // Pi 1.4.0 (pi-ai) leaves `tools` out of a Responses request that has no tools; the recorded Codex requests carried a top-level list.
+  const bodyKeys = expected.path === '/v1/responses' && !('tools' in received.parsed) ? expected.bodyKeys.filter(key => key !== 'tools') : expected.bodyKeys;
+  assert.deepEqual(Object.keys(received.parsed), bodyKeys, `${label}: body fields`);
+  // Pi 1.4.0 declares the tools of an OpenAI Responses request in place, as an `additional_tools` input item, not in `tools`.
+  const declared = received.parsed.tools?.length ?? received.parsed.input?.find?.(item => item.type === 'additional_tools')?.tools?.length ?? 0;
+  assert.equal(declared, expected.tools, `${label}: tools`);
   assert.equal(received.parsed.stream, expected.stream, `${label}: stream`);
 }
 
