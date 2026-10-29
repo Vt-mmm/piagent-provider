@@ -6,7 +6,7 @@
 // times. Nothing that reached the model is sent twice.
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { describeFailure, failureCode, failureIsAdmissionRefusal, failureIsBriefRefusal, failureReason, failureText, unnamedFailureText } from './failure.mjs';
+import { describeFailure, failureCode, staleConfig, failureIsAdmissionRefusal, failureIsBriefRefusal, failureReason, failureText, unnamedFailureText } from './failure.mjs';
 import { CLIENT_AGENT } from './client-agent.mjs';
 import { shareGrant, releaseGrant } from './grant-share.mjs';
 import { purposeHeaders } from './call-purpose.mjs';
@@ -72,9 +72,14 @@ export function studioStream(owner, role) {
   };
 }
 
+function sameRoute(owner, role, grant) {
+  const route = owner.routes.get(role);
+  if (!route || grant.provider_model_id !== route.native || grant.provider !== route.provider || grant.model_id !== route.model_id) throw Error('managed-route-changed');
+}
+
 async function run(owner, role, model, context, options, purpose, out) {
   const signal = options?.signal, link = owner.studioLink;
-  let wait = null, noted = false, brief = 0, refused = null, rebinds = 0, share = null;
+  let wait = null, noted = false, brief = 0, refused = null, rebinds = 0, share = null, rebuilt = 0;
   const letGo = () => { if (share) { releaseGrant(owner, role, share); share = null; } };
   // The error event and the final message carry the same failure: kept once.
   const unnamed = raw => { noted ||= keepUnnamed(owner, role, raw); return raw; };
@@ -100,21 +105,34 @@ async function run(owner, role, model, context, options, purpose, out) {
       share = shareGrant(owner, role);
       // Agent Watch could not renew the grant because Studio (or Watch's way to
       // it) is out of reach: wait for Studio, then renew again.
+      let rebuild = false;
       const grant = await share.grant.catch(async error => {
         const code = failureCode(failureText(error));
+        if (role === 'main' && staleConfig(code) && !rebuilt && !signal?.aborted) { letGo(); rebuild = true; return null; }
         if (!link?.waits(code) || signal?.aborted) throw refused ? Error(refused) : error;
         letGo();
         const waited = await link.waitUntilBack({ phase: 'broker', code, role, conversation: conversationSession(owner), runId: owner.grant?.run_id ?? null, signal });
         if (!waited) throw refused ? Error(refused) : error;
         return null;
       });
+      // The main agent's run is not the key's Harness any more: a new run, and this request once more.
+      if (!rebuild && grant && role === 'main' && !rebuilt && !signal?.aborted) {
+        try { verifyGrant(grant, owner.manifest, role); sameRoute(owner, role, grant); } catch (error) { if (!staleConfig(error?.message)) throw error; letGo(); rebuild = true; }
+      }
+      if (rebuild) {
+        rebuilt += 1;
+        const next = await owner.rebuildRun({ signal });
+        if (next.effort) options = { ...options, reasoning: next.effort };
+        continue;
+      }
       if (!grant) continue;
       verifyGrant(grant, owner.manifest, role);
       if (role === 'main') owner.grant = grant;
       void link?.flush(grant.token);
       owner.onGrant?.(grant, role);
       const route = owner.routes.get(role);
-      if (!route || grant.provider_model_id !== route.native || grant.provider !== route.provider || grant.model_id !== route.model_id || model.id !== MODEL_ID) throw Error('managed-route-changed');
+      if (!route || model.id !== MODEL_ID) throw Error('managed-route-changed');
+      sameRoute(owner, role, grant);
       const asked = Date.now();
       // The main agent names its conversation; a helper names its role.
       const conversation = role === 'main' ? conversationSession(owner) : null;

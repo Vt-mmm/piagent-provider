@@ -64,8 +64,8 @@ const CODES = {
   'managed-broker:rateLimited': ['busy', 'Studio is limiting this key right now'],
   'managed-broker:identityChanged': ['config-changed', 'the key, harness or run changed in Studio'],
   'managed-broker:invalidResponse': ['config-changed', 'Studio refused to start the run with the current harness'],
-  'managed-route-changed': ['config-changed', 'the harness model changed while this run was active'],
-  'managed-grant-invalid': ['config-changed', 'the harness changed and this conversation still has the old one'],
+  'managed-route-changed': ['config-changed', 'Harness vừa đổi model giữa lượt; lượt kế tiếp sẽ dùng cấu hình mới'],
+  'managed-grant-invalid': ['config-changed', 'Cấu hình công ty (Harness) đã đổi trong lúc hội thoại đang mở; đang tạo phiên mới theo cấu hình mới'],
   'managed-configuration-unavailable': ['config-changed', 'the key has no usable harness'],
   'managed-main-model-unavailable': ['policy', 'the harness main model is not available to this key'],
   'managed-native-catalog-update-required': ['update', 'this package does not know the harness model; update it'],
@@ -85,6 +85,10 @@ const PROVIDER_SERVER_ERROR = new RegExp([
 ].join('|'), 'i');
 const NETWORK = /fetch failed|econnrefused|econnreset|enotfound|ehostunreach|etimedout|socket hang up|network|connection error|terminated|timed? ?out|aborted due to timeout/i;
 
+// Failures a fresh read of the key's configuration can cure: the Harness or the
+// key changed in Studio after this conversation read it, or the helper died.
+export const STALE = /^managed-(grant-invalid|route-changed|broker:(invalidKey|identityChanged|permissionDenied|invalidResponse))$|^thinking_level_unavailable$/;
+export const staleConfig = raw => STALE.test(failureCode(raw));
 export const failureKind = code => CODES[code]?.[0] ?? 'failed';
 // Studio said no at admission, before any model account was asked: the same
 // request can be asked again later and nothing reaches the model twice. A
