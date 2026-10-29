@@ -84,7 +84,7 @@ export class StudioProvider {
   // start becomes a turn answered with the reason (preflight), not a crash.
   async startRun({ text, level, signal }) {
     if (this.grant) return this.grant;
-    this.preflight = null; this.sharedGrants.clear();
+    this.preflight = null; this.sharedGrants.clear(); this.capabilitiesAsked = false;
     try {
       for (;;) {
         try { this.grant = await this.#start(text, level); break; }
@@ -97,7 +97,6 @@ export class StudioProvider {
       const route = { provider: this.grant.provider, model_id: this.grant.model_id, provider_model_id: this.grant.provider_model_id };
       this.installRoute(route);
       this.emitRunState();
-      void refreshCapabilities(this, this.grant).then(() => this.emitRunState());
     } catch (error) { this.preflight = redact(failureText(error)); }
     return this.grant;
   }
@@ -133,7 +132,12 @@ export class StudioProvider {
     if (!this.grant) return;
     const renewal = this.broker.request('renew', slotArgs('main'));
     seedGrant(this, 'main', renewal);
-    try { this.register((await renewal).token); } catch { /* the request itself renews and waits */ }
+    try {
+      const grant = await renewal;
+      this.register(grant.token);
+      // Asked with a renewed token: the start grant's is replaced by the first renew.
+      if (!this.capabilitiesAsked) { this.capabilitiesAsked = true; void refreshCapabilities(this, grant).then(() => this.emitRunState()); }
+    } catch { /* the request itself renews and waits */ }
   }
 
   // The harness package hands over the run's process report to close with.
@@ -162,7 +166,9 @@ export class StudioProvider {
     this.routes.set(key, { provider: route.provider, model_id: route.model_id, native: route.provider_model_id });
     const stream = studioStream(this, key);
     return { effort: grant.effort, models: [{ id: route.provider_model_id, contextWindow: model.contextWindow, maxTokens: model.maxTokens, reasoning: native.reasoning === true }],
-      stream: (context, options) => stream({ ...model, provider: PROVIDER }, context, { ...options, signal: options?.signal ?? signal }) };
+      // Studio refuses a request whose thinking differs from the role's effort.
+      stream: (context, options) => stream({ ...model, provider: PROVIDER }, context,
+        { ...(grant.effort ? { reasoning: grant.effort } : {}), ...options, signal: options?.signal ?? signal }) };
   }
 
   async closeChild({ role, slot }) {

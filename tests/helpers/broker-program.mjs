@@ -26,7 +26,11 @@ rl.on('line', async line => {
     if (request.action === 'config') return reply({ result: manifest });
     if (request.action === 'start') { run = randomUUID(); roles.clear(); return reply({ result: await grant('main') }); }
     if (request.action === 'renew' || request.action === 'child') return reply({ result: await grant(request.role, request.slot) });
-    if (request.action === 'close') { await post('/__test/event', { action: 'close', role: request.role ?? 'main' }); if (!request.role || request.role === 'main') run = null; return reply({ result: true }); }
+    if (request.action === 'close') {
+      await post('/__test/event', { action: 'close', role: request.role ?? 'main' });
+      if (!request.role || request.role === 'main') run = null;
+      return reply({ result: true });
+    }
     reply({ error: 'permissionDenied' });
   } catch { reply({ error: 'broker_failed' }); }
 });

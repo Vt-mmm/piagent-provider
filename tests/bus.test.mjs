@@ -23,6 +23,7 @@ test('run.state tells the harness the allowed thinking levels and the protocol w
     assert.deepEqual(states[0].harness.features, ['process', 'close-retry']);
     assert.equal(states[0].harness.helperLimit, undefined, 'absent unless Studio sends helper_slots');
     assert.deepEqual(states[0].capabilities, []);
+    await t.pi.fire('turn_start', { turnIndex: 0 });
     await new Promise(r => setTimeout(r, 200));
     assert.equal(states.length, 2, 'run.state again once the capability list refreshed');
     assert.deepEqual(states[1].capabilities, ['requests.cancel.v1']);
