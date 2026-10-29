@@ -39,7 +39,7 @@ test('no run token (the as run prefix) in process.env, files, logs, stream outpu
     await run('Studio tắt rồi bật');
     await t.provider.studioLink.flush(t.pi.provider.apiKey);
     await t.pi.fire('turn_start', { turnIndex: 0 });
-    outputs.push(JSON.stringify(await t.provider.studioCall({ path: '/studio/v1/managed/x', body: { a: 1 } }).catch(e => String(e.message))));
+    outputs.push(JSON.stringify(await t.provider.studioCall({ path: '/studio/v1/managed/tool-failures', body: { a: 1 } }).catch(e => String(e.message))));
 
     const seen = { streams: outputs, bus: JSON.stringify(t.pi.seen), ui: JSON.stringify(t.ctx.notices), conversation: JSON.stringify(t.pi.entries),
       registrations: JSON.stringify([...t.pi.providers.values()].map(({ apiKey, streamSimple, ...rest }) => rest)), console: written.join('') };

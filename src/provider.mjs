@@ -6,7 +6,7 @@
 // `context` hook stalls Pi's startup).
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { BUS_VERSION, CHANNEL, callPathAllowed, reply } from './bus.mjs';
+import { BUS_VERSION, CHANNEL, busCallAllowed, reply } from './bus.mjs';
 import { CLIENT_AGENT } from './client-agent.mjs';
 import { failureCode, failureText } from './failure.mjs';
 import { seedGrant, shareGrant, releaseGrant, slotArgs } from './grant-share.mjs';
@@ -174,7 +174,7 @@ export class StudioProvider {
   // default), which never leaves this package. Only Studio's own run and managed paths.
   async studioCall({ method = 'POST', path, body, role = 'main' }) {
     if (!this.grant) throw Error('managed-run-required');
-    if (!callPathAllowed(path) || !['GET', 'POST'].includes(method) || !this.routes.has(role)) throw Error('managed-call-refused');
+    if (!busCallAllowed(path) || !['GET', 'POST'].includes(method) || !this.routes.has(role)) throw Error('managed-call-refused');
     // A helper's call (settle) uses that helper's grant, not main's.
     const share = shareGrant(this, role);
     try {
