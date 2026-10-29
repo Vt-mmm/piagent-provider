@@ -52,6 +52,9 @@ export default async function piagentProvider(pi, deps = {}) {
     const found = model(ctx);
     if (found) await pi.setModel(found);
     thinking.force('medium');
+    // The harness is loaded before the provider, so its first before_agent_start runs before the run
+    // starts here: it learns the Harness (workflow, helper roles, thinking) now, from the manifest.
+    provider.emitRunState();
   });
   // A member's message starts the round over; Pi's auto-retry and the harness's
   // own send-backs start new agent runs of the same message and keep its run.

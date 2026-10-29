@@ -18,6 +18,19 @@ test('session start wires the model, the editor guard and a fixed starting think
   } finally { await t.cleanup(); }
 });
 
+test('session start tells the harness the Harness before any run exists', async () => {
+  const t = await setup({ manifestOptions: { extra: { workflow: { plan: 'off', verify: 'require', review: 'require', max_fix_loops: 2 } } } });
+  try {
+    const seen = [];
+    t.pi.events.on('piagent:run.state', d => seen.push(d));
+    await t.pi.fire('session_start', {});
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].runId, null);
+    assert.equal(seen[0].harness.workflow.verify, 'require');
+    assert.equal(t.broker.count('start'), 0, 'no run was started for it');
+  } finally { await t.cleanup(); }
+});
+
 test('picking another provider\'s model is undone with a message', async () => {
   const t = await setup();
   try {
