@@ -1,0 +1,197 @@
+{
+ "note": "Masked from a real run through Agent Watch on 2026-10-29; no tokens, ids or hosts.",
+ "requests": [
+  {
+   "method": "GET",
+   "path": "/v1/capabilities",
+   "status": 200,
+   "headerNames": [
+    "accept",
+    "authorization",
+    "user-agent"
+   ],
+   "headerValues": {
+    "accept": "application/json"
+   },
+   "bodyKeys": null,
+   "tools": null,
+   "stream": null,
+   "responseHeaderNames": [
+    "content-type",
+    "x-request-id",
+    "x-studio-boot",
+    "x-studio-version"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/claude/v1/messages",
+   "status": 200,
+   "headerNames": [
+    "accept",
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "anthropic-version",
+    "content-type",
+    "user-agent",
+    "x-agent-purpose",
+    "x-api-key",
+    "x-claude-code-session-id",
+    "x-session-id"
+   ],
+   "headerValues": {
+    "accept": "application/json",
+    "anthropic-beta": "mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01,inline-tools-2026-09-15",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-version": "2023-06-01",
+    "content-type": "application/json",
+    "x-agent-purpose": "answer"
+   },
+   "bodyKeys": [
+    "model",
+    "messages",
+    "max_tokens",
+    "stream",
+    "system",
+    "tools",
+    "thinking",
+    "output_config"
+   ],
+   "tools": 2,
+   "stream": true,
+   "responseHeaderNames": [
+    "content-type",
+    "x-request-id",
+    "x-studio-accept-encoding",
+    "x-studio-boot",
+    "x-studio-version"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/claude/v1/messages",
+   "status": 200,
+   "headerNames": [
+    "accept",
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "anthropic-version",
+    "content-type",
+    "user-agent",
+    "x-agent-after",
+    "x-agent-purpose",
+    "x-api-key",
+    "x-claude-code-session-id",
+    "x-session-id"
+   ],
+   "headerValues": {
+    "accept": "application/json",
+    "anthropic-beta": "mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01,inline-tools-2026-09-15",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-version": "2023-06-01",
+    "content-type": "application/json",
+    "x-agent-after": "get_time",
+    "x-agent-purpose": "tool_step"
+   },
+   "bodyKeys": [
+    "model",
+    "messages",
+    "max_tokens",
+    "stream",
+    "system",
+    "tools",
+    "thinking",
+    "output_config"
+   ],
+   "tools": 2,
+   "stream": true,
+   "responseHeaderNames": [
+    "content-type",
+    "x-request-id",
+    "x-studio-accept-encoding",
+    "x-studio-boot",
+    "x-studio-version"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/v1/responses",
+   "status": 200,
+   "headerNames": [
+    "accept",
+    "authorization",
+    "content-type",
+    "session_id",
+    "user-agent",
+    "x-agent-purpose",
+    "x-client-request-id",
+    "x-session-id"
+   ],
+   "headerValues": {
+    "accept": "application/json",
+    "content-type": "application/json",
+    "x-agent-purpose": "brief"
+   },
+   "bodyKeys": [
+    "model",
+    "input",
+    "stream",
+    "prompt_cache_key",
+    "store",
+    "tools",
+    "reasoning",
+    "include"
+   ],
+   "tools": 1,
+   "stream": true,
+   "responseHeaderNames": [
+    "content-type",
+    "x-request-id",
+    "x-studio-accept-encoding",
+    "x-studio-boot",
+    "x-studio-version"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/v1/responses",
+   "status": 200,
+   "headerNames": [
+    "accept",
+    "authorization",
+    "content-type",
+    "session_id",
+    "user-agent",
+    "x-agent-after",
+    "x-agent-purpose",
+    "x-client-request-id",
+    "x-session-id"
+   ],
+   "headerValues": {
+    "accept": "application/json",
+    "content-type": "application/json",
+    "x-agent-after": "get_time",
+    "x-agent-purpose": "tool_step"
+   },
+   "bodyKeys": [
+    "model",
+    "input",
+    "stream",
+    "prompt_cache_key",
+    "store",
+    "tools",
+    "reasoning",
+    "include"
+   ],
+   "tools": 1,
+   "stream": true,
+   "responseHeaderNames": [
+    "content-type",
+    "x-request-id",
+    "x-studio-accept-encoding",
+    "x-studio-boot",
+    "x-studio-version"
+   ]
+  }
+ ]
+}

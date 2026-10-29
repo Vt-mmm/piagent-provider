@@ -2,6 +2,7 @@
 // talks to a real Studio, broker or model; every id and token is synthetic.
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 const AUTHORITY = { studio_instance_id: '00000000-0000-4000-8000-000000000001', dataset_epoch: '00000000-0000-4000-8000-000000000002', auth_generation: 1 };
 export const MODELS = [
@@ -82,7 +83,8 @@ const WIRES = { '/claude/v1/messages': anthropic, '/v1/responses': responses, '/
 // 'midstream' an error event after the first content.
 export class FakeStudio {
   constructor(world, { reply = 'Xin chào từ Studio giả.' } = {}) {
-    Object.assign(this, { world, requests: [], disconnects: [], events: [], plan: [], reply, state: 'ready', boot: randomUUID(), version: '0.40.0', capabilities: ['requests.cancel.v1'], sockets: new Set() });
+    Object.assign(this, { world, requests: [], disconnects: [], events: [], plan: [], reply, state: 'ready', boot: randomUUID(), version: '0.40.0',
+      capabilities: ['requests.cancel.v1'], sockets: new Set() });
   }
   async listen(port = 0) {
     this.server = http.createServer((req, res) => void this.handle(req, res));
@@ -99,14 +101,17 @@ export class FakeStudio {
   async handle(req, res) {
     const url = new URL(req.url, this.origin), chunks = [];
     for await (const chunk of req) chunks.push(chunk);
-    const raw = Buffer.concat(chunks).toString('utf8'), token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? req.headers['x-api-key'];
+    const bytes = Buffer.concat(chunks), gzip = req.headers['content-encoding'] === 'gzip';
+    const raw = (gzip ? gunzipSync(bytes) : bytes).toString('utf8');
+    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? req.headers['x-api-key'];
+    if (this.advertiseGzip) res.setHeader('x-studio-accept-encoding', 'gzip');
     res.setHeader('x-studio-boot', this.boot); res.setHeader('x-studio-version', this.version); res.setHeader('x-request-id', randomUUID());
     const json = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     if (url.pathname === '/__test/grant') { const g = JSON.parse(raw); this.world.valid.set(g.role_id, g.token); this.events.push(g); return json(200, {}); }
     if (url.pathname === '/__test/event') { this.events.push(JSON.parse(raw)); return json(200, {}); }
     if (url.pathname === '/v1/heartbeat') return json(this.state === 'ready' ? 200 : 503, { status: this.state, boot_id: this.boot, version: this.version, started_at: new Date().toISOString() });
     const authorized = [...this.world.valid.values()].includes(token);
-    const record = { path: url.pathname, method: req.method, headers: req.headers, body: raw, authorized, token };
+    const record = { path: url.pathname, method: req.method, headers: req.headers, body: raw, raw: bytes, authorized, token };
     this.requests.push(record);
     if (url.pathname === '/v1/capabilities') return json(200, { capabilities: this.capabilities });
     if (url.pathname === '/studio/v1/managed/disconnects') { this.disconnects.push(JSON.parse(raw)); res.writeHead(204); return res.end(); }

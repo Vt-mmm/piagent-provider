@@ -21,7 +21,8 @@ export function readBinding(file = process.env.PIAGENT_BINDING ?? process.env.AG
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.size > BINDING_BYTES) throw Error('managed-binding-invalid');
   const binding = parseJson(fs.readFileSync(file, 'utf8'));
-  if (binding?.schema_version !== 1 || (binding.model !== undefined && binding.model !== 'agent-watch-auto') || !/^[a-f0-9]{64}$/.test(binding.profile_id ?? '')) throw Error('managed-binding-invalid');
+  const modelOk = binding?.model === undefined || binding.model === 'agent-watch-auto';
+  if (binding?.schema_version !== 1 || !modelOk || !/^[a-f0-9]{64}$/.test(binding.profile_id ?? '')) throw Error('managed-binding-invalid');
   return { ...binding, origin: safeOrigin(binding.origin) };
 }
 

@@ -118,7 +118,7 @@ test('the conversation id is fixed for every request of every turn', async () =>
     assert.equal(requests.length, 4);
     for (const r of requests) assert.equal(r.headers['x-claude-code-session-id'], 'session-0001-fixed');
     for (const r of requests.slice(0, 2)) assert.equal(r.headers['x-agent-purpose'], 'answer');
-    assert.match(requests[0].headers['user-agent'], /^piagent-provider\//);
+    assert.match(requests[0].headers['user-agent'], /^piagent\/\d+\.\d+\.\d+/);
   } finally { await t.cleanup(); }
 });
 

@@ -37,7 +37,12 @@ test('failures: Studio code, gateway page, network words and local codes; the se
   assert.equal(redact(`x ${token} y Bearer abcdefghijkl z sk-abcdefghijklmnop`), 'x [redacted] y [redacted] z [redacted]');
 });
 
-test('the client names itself with the package version', () => assert.match(CLIENT_AGENT, /^piagent-provider\/\d+\.\d+\.\d+/));
+// Studio tells the coding tool from the User-Agent (internal/clients/service.go, pattern "pi").
+test('the client names itself so Studio recognises it as the Pi family with its version', () => {
+  const studioPattern = /(?:^|\s)pi(?:-coding-agent|agent)?\/([0-9]{1,4}(?:\.[0-9]{1,5}){1,3})/i;
+  assert.match(CLIENT_AGENT, studioPattern);
+  assert.match(CLIENT_AGENT, /^piagent\//);
+});
 
 test('pi host: pinned version, plan, private install paths, no writes to the real home', () => {
   assert.equal(PI_HOST_VERSION, '1.3.0');
