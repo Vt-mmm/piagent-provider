@@ -22,3 +22,32 @@ test('T5: no prompt text goes to Studio in a call header: a helper\'s brief titl
   assert.deepEqual(Object.keys(headers), ['X-Agent-Purpose']);
   assert.ok(!JSON.stringify(headers).includes('login'));
 });
+
+test('T1: with the bus secret, studio.call, grant.request and run.process from a stranger are refused', async () => {
+  const { setup } = await import('./helpers/setup.mjs');
+  const { serveNonce, withNonce } = await import('../src/bus-nonce.mjs');
+  const ask = (pi, channel, payload) => new Promise(resolve => pi.events.emit(channel, { v: 1, ...payload, reply: resolve }));
+  const t = await setup({ beforeLoad: pi => serveNonce(pi.events) });
+  try {
+    await t.pi.fire('before_agent_start', { messageType: 'user', prompt: 'x' });
+    const forged = await ask(t.pi, 'piagent:studio.call', { method: 'POST', path: '/studio/v1/managed/tool-failures', body: {} });
+    assert.deepEqual([forged.ok, forged.error], [false, 'managed-bus-nonce']);
+    const grant = await ask(t.pi, 'piagent:grant.request', { role: 'scout' });
+    assert.equal(grant.ok, false);
+    const real = await new Promise(resolve => t.pi.events.emit('piagent:studio.call', withNonce(t.pi.events, { v: 1, method: 'POST', path: '/studio/v1/managed/tool-failures', body: {}, reply: resolve })));
+    assert.equal(real.ok, true, real.error);
+  } finally { await t.cleanup(); }
+});
+
+test('L3: a binding that others can write, or that belongs to someone else, is refused', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const { readBinding } = await import('../src/index.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binding-')), file = path.join(dir, 'binding.json');
+  fs.writeFileSync(file, JSON.stringify({ schema_version: 1, origin: 'https://aw.example.test', profile_id: 'a'.repeat(64), broker: '/x/broker' }));
+  fs.chmodSync(file, 0o600);
+  assert.equal(readBinding(file).origin, 'https://aw.example.test');
+  fs.chmodSync(file, 0o666);
+  assert.throws(() => readBinding(file), /managed-binding-untrusted/);
+  fs.chmodSync(file, 0o620);
+  assert.throws(() => readBinding(file), /managed-binding-untrusted/);
+});

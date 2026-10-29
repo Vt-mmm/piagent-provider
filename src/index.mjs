@@ -17,9 +17,18 @@ const BINDING_BYTES = 16_384;
 // The file is named by PIAGENT_BINDING (tests, a second profile) or AGENT_WATCH_MANAGED_BINDING (set by the
 // bundle launcher / Agent Watch); without either, the one the stock-Pi install of Agent Watch writes.
 // A binding of the bundle runtime carries no `model`; one that does must name the company model.
+// The binding names the program that holds the run's key and the origin that receives it: whoever can write it, or the program, decides where
+// the member's credentials go. Both must belong to this user (or root) and not be writable by the group or others.
+export function assertOwnFile(file, error) {
+  if (process.platform === 'win32') return;
+  const stat = fs.statSync(file);
+  if ((stat.uid !== process.getuid() && stat.uid !== 0) || (stat.mode & 0o022) !== 0) throw Error(error);
+}
+
 export function readBinding(file = process.env.PIAGENT_BINDING ?? process.env.AGENT_WATCH_MANAGED_BINDING ?? path.join(os.homedir(), '.pi', 'agent', 'agent-watch-managed.json')) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.size > BINDING_BYTES) throw Error('managed-binding-invalid');
+  assertOwnFile(file, 'managed-binding-untrusted');
   const binding = parseJson(fs.readFileSync(file, 'utf8'));
   if (binding?.schema_version !== 1 || (binding.model !== undefined && binding.model !== 'agent-watch-auto') || !/^[a-f0-9]{64}$/.test(binding.profile_id ?? '')) throw Error('managed-binding-invalid');
   return { ...binding, origin: safeOrigin(binding.origin) };
@@ -38,6 +47,7 @@ async function defaultDeps() {
 export default async function piagentProvider(pi, deps = {}) {
   const binding = deps.binding ?? readBinding();
   const base = { ...(await defaultDeps()), ...deps };
+  if (!deps.broker) { if (!path.isAbsolute(String(binding.broker))) throw Error('managed-binding-untrusted'); assertOwnFile(binding.broker, 'managed-binding-untrusted'); }
   const broker = deps.broker ?? new BrokerClient({ executable: binding.broker, profileID: binding.profile_id });
   const provider = await StudioProvider.create({ pi, ai: base.ai, apis: base.apis, broker, origin: binding.origin, lookup: base.lookup,
     stateDir: deps.stateDir ?? process.env.PI_CODING_AGENT_DIR ?? null, fetchImpl: deps.fetchImpl, briefPauseMs: deps.briefPauseMs, linkOptions: deps.linkOptions });
